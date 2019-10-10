@@ -44,7 +44,7 @@ void robotListener(const geometry_msgs::Pose::ConstPtr& msg){
 	if(!_firstRealPoseReceived)
 	{
 		_eeOrientation << msg->orientation.w, msg->orientation.x, msg->orientation.y, msg->orientation.z;
-		_eeRotMat = Utils::quaternionToRotationMatrix(_eeOrientation);
+		_eeRotMat = Utils<float>::quaternionToRotationMatrix(_eeOrientation);
 		_firstRealPoseReceived = true;
 		ROS_INFO("Robot Pose received\n");
   	
@@ -64,15 +64,15 @@ int main(int argc, char **argv)
 
 	Eigen::VectorXf xD(3);		// Desired velocity
 
-	int linesToscip=30;
+	int linesToscip=0;
 
-	std::ifstream myfile("src/text_to_traject/txtFiles/trial_1.txt");
+	std::ifstream myfile("src/text_to_traject/txtFiles/trial_all.txt");
 	if(!myfile.is_open()){
 		std::cerr<<"Unable to open file\n";
 		return 0;
 	}
 
-	char cNum[10];
+	char cNum[100];
 
 
 	ros::init(argc, argv, "txtToTraj");
@@ -80,10 +80,10 @@ int main(int argc, char **argv)
 	ros::NodeHandle n;
 
 
-	ros::Subscriber robotSub=n.subscribe("lwr/ee_pose", 10, robotListener);
+	ros::Subscriber robotSub=n.subscribe("/lwr/ee_pose", 10, robotListener);
 
-	ros::Publisher _pubDesiredTwist=n.advertise<geometry_msgs::Twist>("/lwr/joint_controllers/passive_ds_command_vel", 10);
-	ros::Publisher _pubDesiredOrientation=n.advertise<geometry_msgs::Quaternion>("/lwr/joint_controllers/passive_ds_command_orient", 10);
+	ros::Publisher _pubDesiredTwist=n.advertise<geometry_msgs::Twist>("/lwr/joint_controllers/passive_ds_command_vel", 1);
+	ros::Publisher _pubDesiredOrientation=n.advertise<geometry_msgs::Quaternion>("/lwr/joint_controllers/passive_ds_command_orient", 1);
 
 	// geometry_msgs::Pose _msgDesiredPose;
 
@@ -96,13 +96,13 @@ int main(int argc, char **argv)
 
 	
 
-	ros::Rate loop_rate(200);
+	ros::Rate loop_rate(500);
 
 	Eigen::MatrixXf W_M(3,3);
 
-	W_M<< -30.0,0.0,0.0,
-		  0.0,-30.0,0.0,
-		  0.0,0.0,-30.0;
+	W_M<< -5.0,0.0,0.0,
+		  0.0,-5.0,0.0,
+		  0.0,0.0,-5.0;
 
 	int count = 0;
 
@@ -119,13 +119,39 @@ int main(int argc, char **argv)
 			myfile.getline(cNum,256,'\n');
 			desiredNextPosition[2]=std::atof(cNum);
 
+			// std::cerr << "A" << std::endl;
 			for(int j=0;j<linesToscip;j++){
+				// std::cerr << myfile.peek() << std::endl;
 				if(myfile.peek() != EOF){
+					// std::cerr << "j: " << j << std::endl;
 					myfile.getline(cNum,256,'\n');
+					// std::cerr << "j: " << j << std::endl;
+
 				}
 			}
 
+			// std::cerr << "B" << std::endl;
+
 			if(myfile.peek() == EOF){
+							// Publish desired twist (passive ds controller)
+				_msgDesiredTwist.linear.x  = 0.0f;
+				_msgDesiredTwist.linear.y  = 0.0f;
+				_msgDesiredTwist.linear.z  = 0.0f;
+				_msgDesiredTwist.angular.x = 0.0f;
+				_msgDesiredTwist.angular.y = 0.0f;
+				_msgDesiredTwist.angular.z = 0.0f;
+
+				_pubDesiredTwist.publish(_msgDesiredTwist);
+
+				// Desired quaternion to have the end effector looking down
+				_qd << 0.0f, 0.0f, 1.0f, 0.0f;
+
+				// Publish desired orientation
+				_msgDesiredOrientation.w = _qd(0);
+				_msgDesiredOrientation.x = _qd(1);
+				_msgDesiredOrientation.y = _qd(2);
+				_msgDesiredOrientation.z = _qd(3);
+				_pubDesiredOrientation.publish(_msgDesiredOrientation);
 				break;
 			}
 
@@ -135,6 +161,10 @@ int main(int argc, char **argv)
 
 			
 			xD=W_M*(_eePosition-desiredNextPosition);
+			if(xD.norm()>0.3f)
+			{
+				xD *= 0.3/xD.norm();
+			}
 			
 			
 
@@ -143,6 +173,7 @@ int main(int argc, char **argv)
 			std::cout << "speed: " << xD.norm() << "\n";
 			std::cout << "distance: " << (_eePosition-desiredNextPosition).norm() << "\n";
 			std::cout << "target: " << desiredNextPosition[0] << " " << desiredNextPosition[1] << " " << desiredNextPosition[2] <<"\n";
+			std::cout << "robot: " << _eePosition.transpose() << std::endl;
 
 			
 			// Publish desired twist (passive ds controller)
@@ -163,6 +194,7 @@ int main(int argc, char **argv)
 			_msgDesiredOrientation.x = _qd(1);
 			_msgDesiredOrientation.y = _qd(2);
 			_msgDesiredOrientation.z = _qd(3);
+			_pubDesiredOrientation.publish(_msgDesiredOrientation);
 
 	
 		}
